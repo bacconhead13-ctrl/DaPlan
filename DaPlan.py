@@ -1,209 +1,109 @@
 import streamlit as st
-import pandas as pd
-import datetime
-from datetime import date
-import plotly.express as px
+import json
+import os
+from datetime import datetime, date
 
-# 設置頁面配置
+# 设置页面配置
 st.set_page_config(
-    page_title="個人行程計劃管理",
-    page_icon="🗓️",
+    page_title="个人行程计划",
+    page_icon="✈️",
     layout="wide"
 )
 
-# 初始化會話狀態 - 用於存儲行程數據
-if 'trips' not in st.session_state:
-    st.session_state.trips = pd.DataFrame({
-        'id': [],
-        '標題': [],
-        '日期': [],
-        '時間': [],
-        '分類': [],
-        '地點': [],
-        '備註': [],
-        '完成狀態': []
-    })
-    st.session_state.next_id = 1
+# 初始化数据文件
+DATA_FILE = "trip_plans.json"
 
-# 定義核心功能函數
-def add_trip(title, trip_date, trip_time, category, location, notes):
-    """添加新行程"""
-    new_trip = pd.DataFrame({
-        'id': [st.session_state.next_id],
-        '標題': [title],
-        '日期': [trip_date],
-        '時間': [trip_time],
-        '分類': [category],
-        '地點': [location],
-        '備註': [notes],
-        '完成狀態': [False]
-    })
-    st.session_state.trips = pd.concat([st.session_state.trips, new_trip], ignore_index=True)
-    st.session_state.next_id += 1
-    st.success("行程添加成功！")
+def init_data():
+    """初始化行程数据文件"""
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump([], f, ensure_ascii=False, indent=4)
 
-def delete_trip(trip_id):
-    """刪除指定行程"""
-    st.session_state.trips = st.session_state.trips[st.session_state.trips['id'] != trip_id]
-    st.success("行程刪除成功！")
+def load_plans():
+    """加载所有行程计划"""
+    init_data()
+    with open(DATA_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
-def update_trip_status(trip_id, status):
-    """更新行程完成狀態"""
-    idx = st.session_state.trips[st.session_state.trips['id'] == trip_id].index
-    st.session_state.trips.loc[idx, '完成狀態'] = status
+def save_plan(plan):
+    """保存新行程"""
+    plans = load_plans()
+    # 添加唯一ID和创建时间
+    plan["id"] = len(plans) + 1
+    plan["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    plans.append(plan)
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(plans, f, ensure_ascii=False, indent=4)
+    return True
 
-# 頁面標題
-st.title("🗓️ 個人行程計劃管理系統")
-st.divider()
+def delete_plan(plan_id):
+    """删除指定ID的行程"""
+    plans = load_plans()
+    new_plans = [p for p in plans if p["id"] != plan_id]
+    # 重新分配ID以保持连续
+    for i, p in enumerate(new_plans):
+        p["id"] = i + 1
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(new_plans, f, ensure_ascii=False, indent=4)
+    return True
 
-# 側邊欄 - 添加新行程
-with st.sidebar:
-    st.header("添加新行程")
+# 主页面
+def main():
+    st.title("✈️ 个人行程计划管理")
+    st.divider()
+
+    # 侧边栏 - 添加新行程
+    with st.sidebar:
+        st.header("添加新行程")
+        trip_name = st.text_input("行程名称", placeholder="例如：周末厦门游")
+        trip_date = st.date_input("行程日期", value=date.today())
+        trip_location = st.text_input("行程地点", placeholder="例如：厦门市思明区")
+        trip_description = st.text_area("行程描述", placeholder="详细的行程安排...")
+        trip_priority = st.selectbox("优先级", ["低", "中", "高"])
+
+        if st.button("保存行程", type="primary"):
+            if trip_name and trip_location:
+                new_plan = {
+                    "name": trip_name,
+                    "date": trip_date.strftime("%Y-%m-%d"),
+                    "location": trip_location,
+                    "description": trip_description,
+                    "priority": trip_priority
+                }
+                save_plan(new_plan)
+                st.success("行程添加成功！")
+                st.rerun()  # 刷新页面
+            else:
+                st.error("行程名称和地点不能为空！")
+
+    # 主内容区 - 显示所有行程
+    st.subheader("我的行程列表")
     
-    # 行程表單
-    trip_title = st.text_input("行程標題", placeholder="例如：早上8點健身")
-    trip_date = st.date_input("行程日期", value=date.today())
-    trip_time = st.time_input("行程時間", value=datetime.time(9, 0))
-    trip_category = st.selectbox(
-        "行程分類",
-        ["工作", "學習", "生活", "娛樂", "出行", "其他"]
-    )
-    trip_location = st.text_input("行程地點", placeholder="可選")
-    trip_notes = st.text_area("備註信息", placeholder="可選")
+    plans = load_plans()
     
-    # 添加行程按鈕
-    if st.button("添加行程", type="primary"):
-        if trip_title.strip() == "":
-            st.error("行程標題不能為空！")
-        else:
-            add_trip(trip_title, trip_date, trip_time, trip_category, trip_location, trip_notes)
-
-# 主頁面 - 行程管理
-tab1, tab2, tab3 = st.tabs(["📋 行程列表", "📊 行程統計", "⚙️ 設置"])
-
-with tab1:
-    # 篩選功能
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        filter_date = st.date_input("按日期篩選", value=None)
-    with col2:
-        filter_category = st.selectbox("按分類篩選", ["全部"] + list(st.session_state.trips['分類'].unique()))
-    with col3:
-        filter_status = st.selectbox("按完成狀態篩選", ["全部", "已完成", "未完成"])
-    
-    # 應用篩選
-    filtered_trips = st.session_state.trips.copy()
-    
-    if filter_date:
-        filtered_trips = filtered_trips[filtered_trips['日期'] == filter_date]
-    if filter_category != "全部":
-        filtered_trips = filtered_trips[filtered_trips['分類'] == filter_category]
-    if filter_status != "全部":
-        filtered_trips = filtered_trips[filtered_trips['完成狀態'] == (filter_status == "已完成")]
-    
-    # 顯示行程列表
-    if filtered_trips.empty:
-        st.info("暫無行程數據，請添加新行程！")
+    if not plans:
+        st.info("暂无行程计划，点击左侧添加吧！")
     else:
-        # 按日期和時間排序
-        filtered_trips['datetime'] = pd.to_datetime(filtered_trips['日期'].astype(str) + ' ' + filtered_trips['時間'].astype(str))
-        filtered_trips = filtered_trips.sort_values('datetime')
+        # 按日期排序
+        plans_sorted = sorted(plans, key=lambda x: x["date"])
         
-        # 遍歷顯示每個行程
-        for idx, row in filtered_trips.iterrows():
-            with st.expander(f"📌 {row['標題']} | {row['日期']} {row['時間']}"):
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.write(f"**分類**: {row['分類']}")
-                    st.write(f"**地點**: {row['地點'] if row['地點'] else '未設置'}")
-                    st.write(f"**備註**: {row['備註'] if row['備註'] else '無'}")
-                    st.write(f"**狀態**: {'✅ 已完成' if row['完成狀態'] else '🔲 未完成'}")
-                with col_b:
-                    # 狀態切換按鈕
-                    new_status = st.checkbox(
-                        "標記為完成", 
-                        value=row['完成狀態'],
-                        key=f"status_{row['id']}"
-                    )
-                    if new_status != row['完成狀態']:
-                        update_trip_status(row['id'], new_status)
-                        st.rerun()
-                    
-                    # 刪除按鈕
-                    if st.button("刪除", key=f"delete_{row['id']}", type="secondary"):
-                        delete_trip(row['id'])
+        # 遍历显示行程
+        for plan in plans_sorted:
+            # 创建行程卡片
+            with st.expander(f"📅 {plan['date']} | {plan['name']} | 优先级：{plan['priority']}", expanded=True):
+                col1, col2 = st.columns([8, 2])
+                
+                with col1:
+                    st.write(f"**地点：** {plan['location']}")
+                    st.write(f"**描述：** {plan['description']}")
+                    st.write(f"**创建时间：** {plan.get('created_at', '未知')}")
+                
+                with col2:
+                    # 删除按钮
+                    if st.button("🗑️ 删除", key=f"delete_{plan['id']}"):
+                        delete_plan(plan['id'])
+                        st.success("行程已删除！")
                         st.rerun()
 
-with tab2:
-    # 行程統計可視化
-    st.header("行程數據統計")
-    
-    if st.session_state.trips.empty:
-        st.info("暫無數據可統計，請先添加行程！")
-    else:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # 分類統計餅圖
-            category_counts = st.session_state.trips['分類'].value_counts()
-            fig1 = px.pie(
-                values=category_counts.values,
-                names=category_counts.index,
-                title="行程分類分布",
-                hole=0.3
-            )
-            st.plotly_chart(fig1, use_container_width=True)
-        
-        with col2:
-            # 完成狀態統計
-            status_counts = st.session_state.trips['完成狀態'].value_counts()
-            status_counts.index = status_counts.index.map({True: '已完成', False: '未完成'})
-            fig2 = px.bar(
-                x=status_counts.index,
-                y=status_counts.values,
-                title="行程完成狀態",
-                color=status_counts.index,
-                color_discrete_map={'已完成': 'green', '未完成': 'orange'}
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-        
-        # 每日行程數量
-        st.subheader("每日行程數量")
-        daily_counts = st.session_state.trips['日期'].value_counts().sort_index()
-        fig3 = px.line(
-            x=daily_counts.index,
-            y=daily_counts.values,
-            title="每日行程趨勢",
-            markers=True
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-
-with tab3:
-    st.header("系統設置")
-    
-    # 清空所有行程
-    if st.button("清空所有行程", type="secondary"):
-        if st.checkbox("確認清空所有數據（不可恢復）"):
-            st.session_state.trips = pd.DataFrame({
-                'id': [],
-                '標題': [],
-                '日期': [],
-                '時間': [],
-                '分類': [],
-                '地點': [],
-                '備註': [],
-                '完成狀態': []
-            })
-            st.session_state.next_id = 1
-            st.success("所有行程已清空！")
-            st.rerun()
-    
-    # 數據導出
-    st.subheader("數據導出")
-    csv_data = st.session_state.trips.to_csv(index=False)
-    st.download_button(
-        label="導出為CSV文件",
-        data=csv_data,
-        file_name=f"行程計劃_{date.today()}.csv",
-        mime="text/csv"
-    )
+if __name__ == "__main__":
+    main()
